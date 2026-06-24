@@ -65,7 +65,14 @@ embeds them (base64) into `cloud-init/user-data.yaml` — re-run it after editin
 ```bash
 cd windows-worker
 
-# 1. (Re)generate the cloud-init if you changed anything under build/ or windows/
+# 0. Set up your config. The real build/config.env is git-ignored (it holds the
+#    Harvester token). Copy the template and fill in your values:
+cp build/config.env.example build/config.env
+$EDITOR build/config.env        # set HARVESTER_SERVER/TOKEN, UPLOAD_TO_HARVESTER, etc.
+
+# 1. Generate the cloud-init. It embeds build/config.env if present, otherwise
+#    falls back to config.env.example (valid, but Harvester upload disabled).
+#    Re-run after editing anything under build/ or windows/.
 ./generate-cloud-init.sh
 
 # 2. Create the cloud-init secret + apply the build-host VM

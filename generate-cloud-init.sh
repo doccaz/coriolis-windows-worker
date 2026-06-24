@@ -10,14 +10,29 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="$HERE/cloud-init/user-data.yaml"
 mkdir -p "$HERE/cloud-init"
 
+# Pick which config.env to embed on the build host. A local build/config.env
+# (the real, git-ignored one with your Harvester token) takes precedence; if
+# you haven't created one, fall back to the committed example so a fresh clone
+# still generates a valid — if upload-disabled — cloud-init.
+CONFIG_SRC="$HERE/build/config.env"
+if [[ ! -f "$CONFIG_SRC" ]]; then
+    CONFIG_SRC="$HERE/build/config.env.example"
+    echo "note: build/config.env not found — embedding config.env.example (safe defaults, Harvester upload off)." >&2
+    echo "      copy build/config.env.example -> build/config.env and fill it in to embed real settings." >&2
+fi
+
 # emit_file <dest-path-on-host> <local-source> <mode>
 emit_file() {
     local dest="$1" src="$2" mode="$3"
+    [[ -f "$src" ]] || { echo "ERROR: source file not found: $src" >&2; exit 1; }
+    local b64
+    # Assign separately so base64's exit status isn't masked by `local`.
+    b64="$(base64 -w0 "$src")"
     {
         echo "  - path: $dest"
         echo "    permissions: '$mode'"
         echo "    encoding: b64"
-        echo "    content: $(base64 -w0 "$src")"
+        echo "    content: $b64"
     } >> "$OUT"
 }
 
@@ -50,7 +65,7 @@ packages:
 write_files:
 HEADER
 
-emit_file /opt/coriolis-worker/build/config.env                     "$HERE/build/config.env"                     '0644'
+emit_file /opt/coriolis-worker/build/config.env                     "$CONFIG_SRC"                                '0644'
 emit_file /opt/coriolis-worker/build/download-assets.sh             "$HERE/build/download-assets.sh"             '0755'
 emit_file /opt/coriolis-worker/build/make-config-iso.sh             "$HERE/build/make-config-iso.sh"             '0755'
 emit_file /opt/coriolis-worker/build/build-worker.sh                "$HERE/build/build-worker.sh"                '0755'

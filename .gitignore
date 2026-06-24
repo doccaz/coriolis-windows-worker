@@ -10,6 +10,7 @@ assets/
 *.iso
 *.msi
 
-# Generated cloud-init (re-created by generate-cloud-init.sh)
-# kept in tree intentionally; uncomment to ignore:
-# cloud-init/user-data.yaml
+# Generated cloud-init — a build artifact assembled by generate-cloud-init.sh
+# from build/ + windows/. Not committed: it drifts from its sources and can
+# embed a real build/config.env (Harvester token). Regenerate before deploying.
+cloud-init/user-data.yaml
