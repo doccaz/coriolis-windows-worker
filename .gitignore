@@ -1,6 +1,10 @@
-# Real, secret-bearing config — copy from config.env.example and fill in locally.
-# Never commit; it holds the Harvester API token and build credentials.
+# Real config — copy from config.env.example and fill in locally. Tunables only,
+# but git-ignored so a token pasted directly into it can never be committed.
 build/config.env
+
+# Secrets (Harvester API token, build admin password). Copy from
+# config.secret.env.example. Never commit.
+build/config.secret.env
 
 # Build artifacts / downloaded assets
 coriolis-build-tmp/

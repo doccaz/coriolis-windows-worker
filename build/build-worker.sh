@@ -18,9 +18,20 @@ log() { echo -e "\n=== $* ===" ; }
 # --- preflight -------------------------------------------------------------
 # Runs as a regular user — no sudo. All it needs is access to the system
 # libvirt daemon (be in the 'libvirt' group) and /dev/kvm (the 'kvm' group).
-for bin in qemu-img virsh curl bsdtar; do
+#
+# Check EVERY tool the pipeline uses up front — download (sha256sum), config ISO
+# (genisoimage/xorrisofs), build (qemu-img/virsh/bsdtar) and the optional
+# Harvester upload (jq) — so a missing one fails now, not 20 min into the build.
+for bin in qemu-img virsh curl bsdtar sha256sum; do
     command -v "$bin" >/dev/null || { echo "Missing required tool: $bin" >&2; exit 1; }
 done
+# make-config-iso.sh needs one of these to author the config CD.
+command -v genisoimage >/dev/null || command -v xorrisofs >/dev/null || {
+    echo "Missing required tool: genisoimage or xorrisofs (install xorriso)." >&2; exit 1; }
+# jq is only needed for the optional Harvester upload at the end.
+if [[ "${UPLOAD_TO_HARVESTER:-false}" == "true" ]]; then
+    command -v jq >/dev/null || { echo "Missing required tool: jq (needed for UPLOAD_TO_HARVESTER)" >&2; exit 1; }
+fi
 [[ -e /dev/kvm ]] || { echo "/dev/kvm not present — enable nested virtualization on the Harvester node." >&2; exit 1; }
 # Confirm we can drive system libvirt without root. LIBVIRT_DEFAULT_URI is
 # exported from config.env (qemu:///system); if this fails, add yourself to the

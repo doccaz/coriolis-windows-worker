@@ -58,6 +58,7 @@ packages:
   - virt-install
   - qemu-tools
   - xorriso
+  - bsdtar
   - curl
   - jq
   - util-linux
@@ -66,6 +67,13 @@ write_files:
 HEADER
 
 emit_file /opt/coriolis-worker/build/config.env                     "$CONFIG_SRC"                                '0644'
+# Secrets overlay: embed build/config.secret.env if you've created one, so the
+# build host has the Harvester token for unattended auto-upload. Mode 0600.
+# Skipped (upload simply won't run) if absent.
+if [[ -f "$HERE/build/config.secret.env" ]]; then
+    emit_file /opt/coriolis-worker/build/config.secret.env          "$HERE/build/config.secret.env"             '0600'
+    echo "note: embedding build/config.secret.env (mode 0600) for unattended Harvester upload." >&2
+fi
 emit_file /opt/coriolis-worker/build/download-assets.sh             "$HERE/build/download-assets.sh"             '0755'
 emit_file /opt/coriolis-worker/build/make-config-iso.sh             "$HERE/build/make-config-iso.sh"             '0755'
 emit_file /opt/coriolis-worker/build/build-worker.sh                "$HERE/build/build-worker.sh"                '0755'

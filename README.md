@@ -44,8 +44,9 @@ windows-worker/
 ├── harvester/leap-build-host.yaml    # VMImage + PVC + VirtualMachine for the build host
 ├── harvester/worker-vm.yaml          # smoke-test VM: boot the built image on virtio
 ├── build/
-│   ├── config.env                    # all tunables (URLs, sizes, image index, passwords)
-│   ├── download-assets.sh            # fetch Windows ISO + VMDP ISO + cloudbase-init MSI
+│   ├── config.env.example            # all tunables (URLs+checksums, sizes, image index)
+│   ├── config.secret.env.example     # secrets template (Harvester token, build password)
+│   ├── download-assets.sh            # fetch Windows ISO + VMDP ISO + cloudbase-init MSI (+ SHA256 verify)
 │   ├── make-config-iso.sh            # build config.iso (answer file + toolkit + drivers)
 │   ├── build-worker.sh               # orchestrate the throwaway VM → capture image
 │   ├── upload-to-harvester.sh        # register the qcow2 in Harvester via the REST API
@@ -96,13 +97,16 @@ build host.
 
 ### Auto-register the image in Harvester
 
-Set these in `build/config.env` (or as environment overrides) and the build's
+Put the non-secret bits in `build/config.env` and the token in
+`build/config.secret.env` (or pass any as environment overrides) and the build's
 final step uploads the qcow2 straight into Harvester as a `VirtualMachineImage`
 — no manual download/upload:
 
 ```bash
+# build/config.env
 UPLOAD_TO_HARVESTER=true
 HARVESTER_SERVER=https://harvester.example.com   # the UI/API VIP (:443, not :6443)
+# build/config.secret.env
 HARVESTER_TOKEN=token-xxxxx:yyyyyyyyyyyyyyyy      # UI > Account & API Keys > Create API Key
 # optional: HARVESTER_NAMESPACE, HARVESTER_IMAGE_NAME, HARVESTER_IMAGE_DISPLAY
 ```
@@ -187,14 +191,26 @@ kubectl delete ns coriolis-worker-test
    admin password + sets up the WinRM HTTPS listener, and Coriolis connects on
    `:5986` with Basic auth to perform the Windows OS morphing / driver injection.
 
-## Tuning
+## Configuration
 
-Everything lives in `build/config.env` (override via environment):
+Two files under `build/`, both created by copying their `.example` and both
+git-ignored (override any value via the environment too):
+
+- **`config.env`** — non-secret tunables. Safe to share. Holds the asset URLs and
+  optional `*_SHA256` checksums, VM sizing, image index, timeouts, and the
+  Harvester target (server/namespace/image name).
+- **`config.secret.env`** — secrets only: `HARVESTER_TOKEN` and
+  `BUILD_ADMIN_PASSWORD`. `config.env` sources it automatically if present, and
+  `generate-cloud-init.sh` embeds it (mode `0600`) so unattended Harvester
+  upload works on the build host. If you skip it, those default to empty/throwaway
+  and the Harvester upload is simply not attempted.
+
+Key tunables in `config.env`:
 
 - `WIN_IMAGE_INDEX` — edition in the eval ISO (default `2` = Standard Desktop
   Experience; `1` = Standard Core for a smaller worker).
-- `BUILD_ADMIN_PASSWORD` — temporary build-time Administrator password
-  (cloudbase-init overwrites it from cloud metadata on first boot).
+- `WIN_ISO_SHA256` / `VIRTIO_VMDP_SHA256` / `CLOUDBASE_INIT_SHA256` — set to
+  verify downloads; blank skips the check (with a warning).
 - `BUILD_VM_RAM_MB`, `BUILD_VM_VCPUS`, `WORKER_DISK_SIZE`, timeouts, URLs.
 
 ## Notes & caveats

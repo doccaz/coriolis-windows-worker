@@ -23,6 +23,8 @@ TEST_VM         ?= coriolis-windows-worker
 USER_DATA       := cloud-init/user-data.yaml
 CONFIG          := build/config.env
 CONFIG_EXAMPLE  := build/config.env.example
+SECRET_ENV      := build/config.secret.env
+SECRET_EXAMPLE  := build/config.secret.env.example
 
 .DEFAULT_GOAL := help
 
@@ -36,12 +38,18 @@ help: ## Show this help
 
 # --- local config ----------------------------------------------------------
 .PHONY: config
-config: ## Create build/config.env from the example (won't clobber an existing one)
+config: ## Create build/config.env + config.secret.env from the examples (won't clobber existing ones)
 	@if [ -f $(CONFIG) ]; then \
 	  echo "$(CONFIG) already exists — leaving it untouched."; \
 	else \
 	  cp $(CONFIG_EXAMPLE) $(CONFIG); \
-	  echo "Created $(CONFIG) — edit it (HARVESTER_SERVER/TOKEN, UPLOAD_TO_HARVESTER, ...)."; \
+	  echo "Created $(CONFIG) — edit tunables (HARVESTER_SERVER, UPLOAD_TO_HARVESTER, *_SHA256, ...)."; \
+	fi
+	@if [ -f $(SECRET_ENV) ]; then \
+	  echo "$(SECRET_ENV) already exists — leaving it untouched."; \
+	else \
+	  cp $(SECRET_EXAMPLE) $(SECRET_ENV); chmod 600 $(SECRET_ENV); \
+	  echo "Created $(SECRET_ENV) (mode 600) — put your HARVESTER_TOKEN / BUILD_ADMIN_PASSWORD here."; \
 	fi
 
 # --- cloud-init ------------------------------------------------------------
