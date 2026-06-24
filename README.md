@@ -87,12 +87,12 @@ kubectl -n default create secret generic coriolis-builder-cloudinit \
 kubectl apply -f harvester/leap-build-host.yaml
 
 # 3. Watch the build (≈ 30–90 min depending on download speed + nested-virt perf)
-#    SSH/console into the build host, then:
-sudo tail -f /var/log/coriolis-build.log
+#    SSH/console into the build host as 'builder' (password: builder), then:
+tail -f ~/coriolis-worker-build/coriolis-build.log
 ```
 
 When it finishes, the image is at
-`/var/lib/coriolis-worker-build/output/coriolis-windows-worker.qcow2` on the
+`/home/builder/coriolis-worker-build/output/coriolis-windows-worker.qcow2` on the
 build host.
 
 ### Auto-register the image in Harvester
@@ -116,10 +116,11 @@ It uses the Harvester (Steve) REST API: it `POST`s a `sourceType: upload`
 multipart `chunk`, and polls `.status.progress` to 100%. Run it standalone too:
 
 ```bash
-# sudo only to read the root-owned image under /var/lib; `sudo env` (not
-# `sudo VAR=val`) so the variables actually reach the script.
-sudo env UPLOAD_TO_HARVESTER=true HARVESTER_SERVER=... HARVESTER_TOKEN=... \
-  ./build/upload-to-harvester.sh /var/lib/coriolis-worker-build/output/coriolis-windows-worker.qcow2
+# The default image lives under your home (~/coriolis-worker-build), so no sudo
+# is needed to read it. Pass the path explicitly or let it default to
+# $OUTPUT_DIR/$WORKER_IMAGE_NAME.
+UPLOAD_TO_HARVESTER=true HARVESTER_SERVER=... HARVESTER_TOKEN=... \
+  ./build/upload-to-harvester.sh ~/coriolis-worker-build/output/coriolis-windows-worker.qcow2
 ```
 
 If you leave `UPLOAD_TO_HARVESTER=false`, just copy the image off (e.g. `scp`)
@@ -136,7 +137,8 @@ and is designed to run **without root** — you just need to be in the `libvirt`
 and `kvm` groups. (`build-worker.sh` hand-rolls the domain XML and drives it with
 `virsh`, so `virt-install` is not required.) Install the tools its preflight
 checks for — `qemu-img`, `virsh`, `curl`, `bsdtar`, plus `xorriso`/`genisoimage`
-and `jq` — and point `WORKDIR` at a directory you can write:
+and `jq`. `WORKDIR` defaults to `~/coriolis-worker-build` (user-writable, off the
+root partition); override it to point at any roomy filesystem you can write:
 
 ```bash
 # openSUSE Leap/SLES
@@ -145,12 +147,12 @@ sudo zypper install qemu-kvm libvirt libvirt-client qemu-tools \
 sudo usermod -aG libvirt,kvm "$USER" && newgrp libvirt   # one-time
 
 WINDOWS_SRC_DIR="$PWD/windows" \
-WORKDIR="$HOME/coriolis-worker-build" \
-  ./build/build-worker.sh
+  ./build/build-worker.sh                # assets, image and log land under ~/coriolis-worker-build
 ```
 
-> You can still run the whole thing under `sudo` with the default
-> `WORKDIR=/var/lib/coriolis-worker-build` — root reaches `qemu:///system` too.
+> Everything (assets, the captured qcow2, the build log) lives under `WORKDIR`,
+> so the build needs no root and never touches `/var/lib` or `/var/log`. Set
+> `WORKDIR=/some/other/path` to relocate it.
 
 ## Smoke-test the image boots (before handing it to Coriolis)
 
@@ -160,13 +162,12 @@ It is *not* the worker Coriolis runs — just a "does it boot?" check.
 
 ```bash
 # 1. Upload the image into the test namespace under the name the manifest expects.
-#    sudo only to read the root-owned image under /var/lib; `sudo env` (not
-#    `sudo VAR=val`) so the variables actually reach the script.
-sudo env UPLOAD_TO_HARVESTER=true \
+#    The default image lives under ~/coriolis-worker-build, so no sudo is needed.
+UPLOAD_TO_HARVESTER=true \
 HARVESTER_NAMESPACE=coriolis-worker-test \
 HARVESTER_IMAGE_NAME=coriolis-windows-worker \
 HARVESTER_SERVER=https://192.168.86.250 HARVESTER_TOKEN=... \
-  ./build/upload-to-harvester.sh /var/lib/coriolis-worker-build/output/coriolis-windows-worker.qcow2
+  ./build/upload-to-harvester.sh ~/coriolis-worker-build/output/coriolis-windows-worker.qcow2
 
 # 2. Boot it and watch
 kubectl apply -f harvester/worker-vm.yaml

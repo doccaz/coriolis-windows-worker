@@ -13,6 +13,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=config.env
 source "$HERE/config.env"
 
+# Mirror everything to a persistent log under WORKDIR (user-writable, off the
+# root partition) so manual runs and the systemd service share one tail-able
+# file without needing /var/log or sudo. The journal still captures it too.
+mkdir -p "$(dirname "$LOG_FILE")"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 log() { echo -e "\n=== $* ===" ; }
 
 # --- preflight -------------------------------------------------------------

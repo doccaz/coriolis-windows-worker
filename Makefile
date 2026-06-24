@@ -69,7 +69,7 @@ deploy: cloud-init ## Generate cloud-init, (re)create the secret, apply the buil
 
 .PHONY: logs
 logs: ## Tail the build log on the Harvester build-host VM (needs virtctl)
-	@echo "On the build host run: sudo tail -f /var/log/coriolis-build.log"
+	@echo "On the build host run: tail -f ~builder/coriolis-worker-build/coriolis-build.log"
 	@echo "Console: virtctl vnc -n $(NS) $(BUILD_VM)   (or: virtctl console -n $(NS) $(BUILD_VM))"
 
 .PHONY: destroy

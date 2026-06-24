@@ -3,15 +3,21 @@ Description=Build the Coriolis Windows migration worker image (one-shot)
 Wants=network-online.target libvirtd.service
 After=network-online.target libvirtd.service
 # Skip if a finished image already exists (idempotent across reboots).
-ConditionPathExists=!/var/lib/coriolis-worker-build/output/coriolis-windows-worker.qcow2
+ConditionPathExists=!/home/builder/coriolis-worker-build/output/coriolis-windows-worker.qcow2
 
 [Service]
 Type=oneshot
+# Run as a regular user off the root partition. WORKDIR/LOG_FILE default to
+# this user's home (~/coriolis-worker-build), so the assets, the captured
+# qcow2 and the build log all land under /home, not /var/lib or /var/log.
+User=builder
+Group=builder
+SupplementaryGroups=libvirt kvm
+Environment=HOME=/home/builder
 ExecStart=/opt/coriolis-worker/build/build-worker.sh
 TimeoutStartSec=0
-# Mirror everything to a stable log in addition to the journal.
-StandardOutput=append:/var/log/coriolis-build.log
-StandardError=append:/var/log/coriolis-build.log
+# build-worker.sh tees everything to $LOG_FILE (~/coriolis-worker-build/
+# coriolis-build.log); systemd also captures it in the journal.
 
 [Install]
 WantedBy=multi-user.target

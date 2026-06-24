@@ -42,13 +42,26 @@ cat > "$OUT" <<'HEADER'
 # Harvester cloud-init for the Coriolis Windows-worker BUILD HOST.
 # Deploy this as the user-data of an openSUSE Leap 16.0 VM (nested virt ON).
 # On first boot it installs KVM/libvirt, drops in the builder, and kicks off a
-# one-shot service that produces /var/lib/coriolis-worker-build/output/
-# coriolis-windows-worker.qcow2.
+# one-shot service (running as the unprivileged 'builder' user) that produces
+# /home/builder/coriolis-worker-build/output/coriolis-windows-worker.qcow2.
 #
 # GENERATED FILE — edit build/*.sh, windows/* or generate-cloud-init.sh instead.
 # =============================================================================
 hostname: coriolis-worker-builder
 ssh_pwauth: true
+
+# Unprivileged user the one-shot build service runs as. The build needs no root
+# (system libvirt + /dev/kvm via group membership), so it owns its workdir under
+# /home/builder — keeping the multi-GB assets/qcow2 and the log off the root
+# partition and out of /var/lib /var/log.
+users:
+  - default
+  - name: builder
+    lock_passwd: false
+    # 'builder' / change after first boot. Console/SSH access for watching the build.
+    plain_text_passwd: builder
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
 
 package_update: true
 packages:
@@ -89,12 +102,17 @@ cat >> "$OUT" <<'FOOTER'
 runcmd:
   - [ systemctl, enable, --now, libvirtd ]
   - [ bash, -c, "virsh net-autostart default 2>/dev/null; virsh net-start default 2>/dev/null || true" ]
+  # Let 'builder' drive system libvirt + KVM without root, and own the toolkit
+  # so it can read the 0600 config.secret.env. (Groups exist now that the
+  # libvirt/qemu packages are installed.)
+  - [ bash, -c, "usermod -aG libvirt,kvm builder" ]
+  - [ chown, -R, "builder:builder", /opt/coriolis-worker ]
   - [ systemctl, daemon-reload ]
-  # Auto-start the build. Comment this out to build manually with
-  #   sudo /opt/coriolis-worker/build/build-worker.sh
+  # Auto-start the build (runs as 'builder'). Comment this out to build manually:
+  #   sudo -u builder /opt/coriolis-worker/build/build-worker.sh
   - [ systemctl, enable, --now, coriolis-build.service ]
 
-final_message: "Coriolis worker build host ready. Tail /var/log/coriolis-build.log for progress."
+final_message: "Coriolis worker build host ready. Tail /home/builder/coriolis-worker-build/coriolis-build.log for progress."
 FOOTER
 
 echo "Wrote $OUT"
