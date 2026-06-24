@@ -1,0 +1,100 @@
+# =============================================================================
+# Harvester manifests for the Coriolis Windows-worker BUILD HOST.
+#
+# Apply order:
+#   1. Create the cloud-init secret from the generated user-data:
+#        kubectl -n default create secret generic coriolis-builder-cloudinit \
+#          --from-file=userdata=../cloud-init/user-data.yaml \
+#          --from-literal=networkdata=''
+#   2. kubectl apply -f leap-build-host.yaml
+#
+# Requirements:
+#   * Nested virtualization MUST be enabled on the Harvester node that runs this
+#     VM, otherwise /dev/kvm is unavailable inside the guest and the Windows
+#     install falls back to painfully slow TCG emulation. On the node:
+#        # Intel:  echo "options kvm_intel nested=1" >/etc/modprobe.d/kvm.conf
+#        # AMD:    echo "options kvm_amd   nested=1" >/etc/modprobe.d/kvm.conf
+#     then reload the module / reboot the node. `cpu.model: host-passthrough`
+#     below exposes vmx/svm to this guest.
+# =============================================================================
+---
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: opensuse-leap-16-cloud
+  namespace: default
+spec:
+  displayName: openSUSE Leap 16.0 Minimal Cloud
+  sourceType: download
+  url: https://download.opensuse.org/repositories/openSUSE:/Leap:/16.0:/Images/images/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2
+---
+# Root disk for the build host, provisioned from the Leap image above.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: coriolis-builder-root
+  namespace: default
+  annotations:
+    # Tie this PVC to the Harvester image (namespace/name of the VMImage).
+    harvesterhci.io/imageId: default/opensuse-leap-16-cloud
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      # Big enough for the Windows ISO (~6G) + 40G worker disk + compressed output.
+      storage: 150Gi
+  volumeMode: Block
+  storageClassName: longhorn-opensuse-leap-16-cloud
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: coriolis-worker-builder
+  namespace: default
+  labels:
+    harvesterhci.io/creator: harvester
+spec:
+  runStrategy: RerunOnFailure
+  template:
+    metadata:
+      labels:
+        harvesterhci.io/vmName: coriolis-worker-builder
+    spec:
+      domain:
+        cpu:
+          # host-passthrough surfaces the node's vmx/svm flag for nested KVM.
+          cores: 8
+          model: host-passthrough
+        memory:
+          guest: 12Gi
+        devices:
+          disks:
+            - name: rootdisk
+              bootOrder: 1
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+              model: virtio
+        resources:
+          requests:
+            memory: 12Gi
+            cpu: "8"
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          persistentVolumeClaim:
+            claimName: coriolis-builder-root
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            secretRef:
+              name: coriolis-builder-cloudinit
+            networkDataSecretRef:
+              name: coriolis-builder-cloudinit

@@ -1,0 +1,15 @@
+# Real, secret-bearing config — copy from config.env.example and fill in locally.
+# Never commit; it holds the Harvester API token and build credentials.
+build/config.env
+
+# Build artifacts / downloaded assets
+coriolis-build-tmp/
+output/
+assets/
+*.qcow2
+*.iso
+*.msi
+
+# Generated cloud-init (re-created by generate-cloud-init.sh)
+# kept in tree intentionally; uncomment to ignore:
+# cloud-init/user-data.yaml

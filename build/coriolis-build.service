@@ -1,0 +1,17 @@
+[Unit]
+Description=Build the Coriolis Windows migration worker image (one-shot)
+Wants=network-online.target libvirtd.service
+After=network-online.target libvirtd.service
+# Skip if a finished image already exists (idempotent across reboots).
+ConditionPathExists=!/var/lib/coriolis-worker-build/output/coriolis-windows-worker.qcow2
+
+[Service]
+Type=oneshot
+ExecStart=/opt/coriolis-worker/build/build-worker.sh
+TimeoutStartSec=0
+# Mirror everything to a stable log in addition to the journal.
+StandardOutput=append:/var/log/coriolis-build.log
+StandardError=append:/var/log/coriolis-build.log
+
+[Install]
+WantedBy=multi-user.target

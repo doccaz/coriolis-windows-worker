@@ -1,0 +1,112 @@
+# =============================================================================
+# Smoke-test VM for the built Coriolis Windows worker image on Harvester.
+#
+# Purpose: prove the captured qcow2 actually boots on virtio before you hand it
+# to Coriolis. It is NOT the migration worker Coriolis runs — Coriolis spins up
+# its own instance from the registered image. This is just a "does it boot?"
+# check, deployed in an isolated namespace.
+#
+# Prereqs (upload the image into the SAME namespace + name referenced below):
+#   UPLOAD_TO_HARVESTER=true \
+#   HARVESTER_NAMESPACE=coriolis-worker-test \
+#   HARVESTER_IMAGE_NAME=coriolis-windows-worker \
+#   HARVESTER_SERVER=https://192.168.86.250 HARVESTER_TOKEN=... \
+#   ./build/upload-to-harvester.sh <image.qcow2>
+#
+# Harvester derives the per-image storage class as  longhorn-<image name>, i.e.
+# longhorn-coriolis-windows-worker  (verified against this cluster's images).
+#
+# Apply:
+#   kubectl apply -f worker-vm.yaml
+#   # then: virtctl vnc -n coriolis-worker-test coriolis-windows-worker
+# =============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coriolis-worker-test
+---
+# Boot disk, cloned from the uploaded worker image.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: coriolis-windows-worker-disk
+  namespace: coriolis-worker-test
+  annotations:
+    harvesterhci.io/imageId: coriolis-worker-test/coriolis-windows-worker
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi          # >= the image's virtual size (40G worker disk)
+  volumeMode: Block
+  storageClassName: longhorn-coriolis-windows-worker
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: coriolis-windows-worker
+  namespace: coriolis-worker-test
+  labels:
+    harvesterhci.io/creator: harvester
+spec:
+  runStrategy: RerunOnFailure
+  template:
+    metadata:
+      labels:
+        harvesterhci.io/vmName: coriolis-windows-worker
+    spec:
+      domain:
+        machine:
+          type: q35            # image was built on q35 (SeaBIOS / MBR)
+        cpu:
+          cores: 2
+        memory:
+          guest: 4Gi
+        features:
+          acpi: {}
+          apic: {}
+          # Hyper-V enlightenments — standard for stable Windows on KVM.
+          hyperv:
+            relaxed: {}
+            vapic: {}
+            spinlocks:
+              spinlocks: 8191
+        clock:
+          utc: {}              # image sets RealTimeIsUniversal=1
+          timer:
+            hpet:
+              present: false
+            hyperv: {}
+            pit:
+              tickPolicy: delay
+            rtc:
+              tickPolicy: catchup
+        devices:
+          disks:
+            - name: rootdisk
+              bootOrder: 1
+              disk:
+                bus: virtio    # viostor/vioscsi were made boot-critical (CDDB)
+          interfaces:
+            # e1000e is in-box on Windows, so first-boot networking works even
+            # before the virtio-net driver binds. Switch to model: virtio later.
+            - name: default
+              masquerade: {}
+              model: e1000e
+          inputs:
+            - name: tablet
+              type: tablet
+              bus: usb
+        resources:
+          requests:
+            memory: 4Gi
+            cpu: "2"
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          persistentVolumeClaim:
+            claimName: coriolis-windows-worker-disk

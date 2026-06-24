@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  autounattend.xml — fully unattended Windows Server install for the Coriolis
+  temporary migration worker.
+
+  Strategy:
+    * Install onto a plain SATA/AHCI disk so Windows Setup needs NO extra
+      storage driver (storahci is in-box). VMDP later makes the image
+      boot-capable on virtio (setup /boot_vscsi), so the captured qcow2 boots
+      under Harvester/KubeVirt.
+    * BIOS / MBR layout (matches KubeVirt's default SeaBIOS firmware).
+    * Auto-logon as Administrator once, run configure-worker.ps1, which installs
+      the drivers + cloudbase-init, hardens WinRM, then syspreps and powers off.
+
+  Tokens @WIN_IMAGE_INDEX@ and @BUILD_ADMIN_PASSWORD@ are substituted by
+  build/make-config-iso.sh before the answer file is burned to the config CD.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend"
+          xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral"
+               versionScope="nonSxS">
+      <SetupUILanguage><UILanguage>en-US</UILanguage></SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral"
+               versionScope="nonSxS">
+
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Active>true</Active>
+              <Format>NTFS</Format>
+              <Label>Windows</Label>
+              <Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+              <Key>/IMAGE/INDEX</Key>
+              <Value>@WIN_IMAGE_INDEX@</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>1</PartitionID>
+          </InstallTo>
+        </OSImage>
+      </ImageInstall>
+
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <FullName>Coriolis</FullName>
+        <Organization>Coriolis Migration Worker</Organization>
+        <!-- Evaluation media is pre-keyed; no product key required. -->
+      </UserData>
+    </component>
+  </settings>
+
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral"
+               versionScope="nonSxS">
+      <ComputerName>CORIOLIS-WRK</ComputerName>
+      <TimeZone>UTC</TimeZone>
+    </component>
+
+    <!-- Copy the build toolkit off the config CD onto C: so it survives after
+         the CDs are detached. The CD drive letter is unknown in this pass, so
+         probe D:..H:. -->
+    <component name="Microsoft-Windows-Deployment"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral"
+               versionScope="nonSxS">
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+          <Order>1</Order>
+          <Description>Copy Coriolis build toolkit from config CD</Description>
+          <Path>cmd /c for %D in (D E F G H) do if exist %D:\toolkit\configure-worker.ps1 xcopy /e /i /y %D:\toolkit C:\coriolis-build\</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral"
+               versionScope="nonSxS">
+
+      <UserAccounts>
+        <AdministratorPassword>
+          <Value>@BUILD_ADMIN_PASSWORD@</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+      </UserAccounts>
+
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>Administrator</Username>
+        <LogonCount>3</LogonCount>
+        <Password>
+          <Value>@BUILD_ADMIN_PASSWORD@</Value>
+          <PlainText>true</PlainText>
+        </Password>
+      </AutoLogon>
+
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
+      </OOBE>
+
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Copy Coriolis build toolkit from config CD (drive letters are stable at first logon, unlike during specialize)</Description>
+          <CommandLine>cmd /c for %D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do if exist %D:\toolkit\configure-worker.ps1 xcopy /e /i /y %D:\toolkit C:\coriolis-build\</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Run Coriolis worker configuration</Description>
+          <CommandLine>powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\coriolis-build\configure-worker.ps1</CommandLine>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+
+      <TimeZone>UTC</TimeZone>
+    </component>
+
+    <component name="Microsoft-Windows-International-Core"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral"
+               versionScope="nonSxS">
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+  </settings>
+</unattend>
