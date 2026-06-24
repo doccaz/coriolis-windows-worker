@@ -62,12 +62,16 @@ embeds them (base64) into `cloud-init/user-data.yaml` — re-run it after editin
 
 ## Run it on Harvester (fully automated)
 
+> **Shortcut:** `make help` lists every target. The flow below is
+> `make config` → edit `build/config.env` → `make deploy` → `make logs`.
+> The raw commands are kept here for reference.
+
 ```bash
 cd windows-worker
 
 # 0. Set up your config. The real build/config.env is git-ignored (it holds the
 #    Harvester token). Copy the template and fill in your values:
-cp build/config.env.example build/config.env
+cp build/config.env.example build/config.env   # or: make config
 $EDITOR build/config.env        # set HARVESTER_SERVER/TOKEN, UPLOAD_TO_HARVESTER, etc.
 
 # 1. Generate the cloud-init. It embeds build/config.env if present, otherwise
