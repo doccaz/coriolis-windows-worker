@@ -13,11 +13,12 @@
 #   HARVESTER_SERVER=https://192.168.86.250 HARVESTER_TOKEN=... \
 #   ./build/upload-to-harvester.sh <image.qcow2>
 #
-# Harvester derives the per-image storage class as  longhorn-<image name>, i.e.
-# longhorn-coriolis-windows-worker  (verified against this cluster's images).
+# Harvester's per-image storage class name is auto-generated (lh-<uuid>), NOT
+# longhorn-<image name>. The __IMAGE_STORAGECLASS__ placeholder below is resolved
+# at apply time from the uploaded image's .status.storageClassName.
 #
-# Apply:
-#   kubectl apply -f worker-vm.yaml
+# Apply (resolves + substitutes the storage class for you):
+#   make smoke-test
 #   # then: virtctl vnc -n coriolis-worker-test coriolis-windows-worker
 # =============================================================================
 ---
@@ -41,7 +42,10 @@ spec:
     requests:
       storage: 50Gi          # >= the image's virtual size (40G worker disk)
   volumeMode: Block
-  storageClassName: longhorn-coriolis-windows-worker
+  # Auto-generated per-image storage class (lh-<uuid>), resolved at apply time
+  # from `kubectl -n coriolis-worker-test get vmimage coriolis-windows-worker \
+  #   -o jsonpath={.status.storageClassName}`.
+  storageClassName: __IMAGE_STORAGECLASS__
 ---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine

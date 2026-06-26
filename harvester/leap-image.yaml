@@ -1,0 +1,19 @@
+# =============================================================================
+# Harvester VM image for the Coriolis Windows-worker BUILD HOST.
+#
+# Applied first (before leap-build-host.yaml) because the build host's root PVC
+# references the per-image storage class Harvester generates for this image.
+# That storage class only exists once the image has finished importing, and its
+# name is auto-generated (lh-<uuid>) — read it from .status.storageClassName,
+# do NOT assume longhorn-<image name>.
+# =============================================================================
+---
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: opensuse-leap-16-cloud
+  namespace: default
+spec:
+  displayName: openSUSE Leap 16.0 Minimal Cloud
+  sourceType: download
+  url: https://download.opensuse.org/repositories/openSUSE:/Leap:/16.0:/Images/images/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2

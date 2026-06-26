@@ -1,12 +1,11 @@
 # =============================================================================
 # Harvester manifests for the Coriolis Windows-worker BUILD HOST.
 #
-# Apply order:
-#   1. Create the cloud-init secret from the generated user-data:
-#        kubectl -n default create secret generic coriolis-builder-cloudinit \
-#          --from-file=userdata=../cloud-init/user-data.yaml \
-#          --from-literal=networkdata=''
-#   2. kubectl apply -f leap-build-host.yaml
+# Do NOT apply this file directly with `kubectl apply -f` — the PVC below
+# references the per-image storage class Harvester generates for the Leap image,
+# whose name is auto-generated (lh-<uuid>) and only known after the image
+# imports. Use `make deploy`, which applies leap-image.yaml first, waits for the
+# import, then substitutes __IMAGE_STORAGECLASS__ before applying this file.
 #
 # Requirements:
 #   * Nested virtualization MUST be enabled on the Harvester node that runs this
@@ -18,17 +17,7 @@
 #     below exposes vmx/svm to this guest.
 # =============================================================================
 ---
-apiVersion: harvesterhci.io/v1beta1
-kind: VirtualMachineImage
-metadata:
-  name: opensuse-leap-16-cloud
-  namespace: default
-spec:
-  displayName: openSUSE Leap 16.0 Minimal Cloud
-  sourceType: download
-  url: https://download.opensuse.org/repositories/openSUSE:/Leap:/16.0:/Images/images/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2
----
-# Root disk for the build host, provisioned from the Leap image above.
+# Root disk for the build host, provisioned from the Leap image (leap-image.yaml).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -45,7 +34,9 @@ spec:
       # Big enough for the Windows ISO (~6G) + 40G worker disk + compressed output.
       storage: 150Gi
   volumeMode: Block
-  storageClassName: longhorn-opensuse-leap-16-cloud
+  # Auto-generated per-image storage class (lh-<uuid>), resolved at deploy time
+  # from `kubectl get vmimage opensuse-leap-16-cloud -o jsonpath={.status.storageClassName}`.
+  storageClassName: __IMAGE_STORAGECLASS__
 ---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine

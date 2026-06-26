@@ -41,7 +41,9 @@ Harvester node (nested virt ON)
 windows-worker/
 ├── cloud-init/user-data.yaml         # GENERATED self-contained Harvester cloud-init
 ├── generate-cloud-init.sh            # regenerates the above from the files below
-├── harvester/leap-build-host.yaml    # VMImage + PVC + VirtualMachine for the build host
+├── harvester/leap-image.yaml         # VMImage for the Leap build host (applied first)
+├── harvester/leap-build-host.yaml    # PVC + VirtualMachine for the build host
+├── harvester/apply-with-storageclass.sh  # resolves the image's real storage class, then applies
 ├── harvester/worker-vm.yaml          # smoke-test VM: boot the built image on virtio
 ├── build/
 │   ├── config.env.example            # all tunables (URLs+checksums, sizes, image index)
@@ -63,8 +65,12 @@ embeds them (base64) into `cloud-init/user-data.yaml` — re-run it after editin
 
 ## Run it on Harvester (fully automated)
 
+> There are **two ways to build the same image** — this one (on Harvester) and
+> [the local libvirt build](#run-it-on-any-libvirt-host-no-harvester) below.
+> **Pick one; you don't need both.**
+
 > **Shortcut:** `make help` lists every target. The flow below is
-> `make config` → edit `build/config.env` → `make deploy` → `make logs`.
+> `make config` → edit `build/config.env` → `make build-harvester` → `make logs`.
 > The raw commands are kept here for reference.
 
 ```bash
@@ -80,11 +86,17 @@ $EDITOR build/config.env        # set HARVESTER_SERVER/TOKEN, UPLOAD_TO_HARVESTE
 #    Re-run after editing anything under build/ or windows/.
 ./generate-cloud-init.sh
 
-# 2. Create the cloud-init secret + apply the build-host VM
+# 2. Create the cloud-init secret + apply the build-host VM.
+#    Apply the Leap image FIRST, then let the helper resolve the per-image
+#    storage class (Harvester auto-names it lh-<uuid>, NOT longhorn-<image name>)
+#    and substitute it before applying the PVC + VM. `make build-harvester`
+#    does all of this for you.
 kubectl -n default create secret generic coriolis-builder-cloudinit \
   --from-file=userdata=cloud-init/user-data.yaml \
   --from-literal=networkdata=''
-kubectl apply -f harvester/leap-build-host.yaml
+kubectl apply -f harvester/leap-image.yaml
+./harvester/apply-with-storageclass.sh default opensuse-leap-16-cloud \
+  harvester/leap-build-host.yaml
 
 # 3. Watch the build (≈ 30–90 min depending on download speed + nested-virt perf)
 #    SSH/console into the build host as 'builder' (password: builder), then:
@@ -146,6 +158,7 @@ sudo zypper install qemu-kvm libvirt libvirt-client qemu-tools \
      xorriso bsdtar curl jq
 sudo usermod -aG libvirt,kvm "$USER" && newgrp libvirt   # one-time
 
+# Shortcut: `make build-local` runs build-worker.sh for you.
 WINDOWS_SRC_DIR="$PWD/windows" \
   ./build/build-worker.sh                # assets, image and log land under ~/coriolis-worker-build
 ```
@@ -169,8 +182,10 @@ HARVESTER_IMAGE_NAME=coriolis-windows-worker \
 HARVESTER_SERVER=https://192.168.86.250 HARVESTER_TOKEN=... \
   ./build/upload-to-harvester.sh ~/coriolis-worker-build/output/coriolis-windows-worker.qcow2
 
-# 2. Boot it and watch
-kubectl apply -f harvester/worker-vm.yaml
+# 2. Boot it and watch. `make smoke-test` resolves the image's storage class and
+#    applies the manifest for you; the raw equivalent is:
+./harvester/apply-with-storageclass.sh coriolis-worker-test coriolis-windows-worker \
+  harvester/worker-vm.yaml
 kubectl -n coriolis-worker-test get vmi coriolis-windows-worker -w
 virtctl vnc -n coriolis-worker-test coriolis-windows-worker   # eyeball the console
 
@@ -181,7 +196,10 @@ kubectl delete ns coriolis-worker-test
 > Validated against this lab's Harvester **v1.8.0** (192.168.86.250): the
 > manifest passes server-side admission, and the image→clone-PVC→virtio-boot→
 > pod-network path was confirmed end-to-end with a throwaway VM (since removed).
-> Harvester derives the per-image storage class as `longhorn-<image name>`.
+> Harvester auto-names the per-image storage class `lh-<uuid>` (read from the
+> image's `.status.storageClassName`), **not** `longhorn-<image name>` — the
+> manifests carry an `__IMAGE_STORAGECLASS__` placeholder that
+> `apply-with-storageclass.sh` resolves at apply time.
 
 ## Point Coriolis at the image
 

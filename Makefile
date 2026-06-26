@@ -1,13 +1,17 @@
 # Makefile — convenience entrypoints for the Coriolis Windows worker builder.
 # Thin wrappers around the scripts in build/ and the manifests in harvester/.
-# Every variable below can be overridden, e.g.  make deploy NS=labs
+# Every variable below can be overridden, e.g.  make build-harvester NS=labs
+#
+# There are TWO ways to build the same coriolis-windows-worker.qcow2 — pick ONE,
+# you do NOT need both:
+#   make build-local      # build here with local KVM/libvirt
+#   make build-harvester  # build on a throwaway Harvester build-host VM
 #
 # Quick start:
-#   make config        # create build/config.env from the template, then edit it
-#   make cloud-init    # (re)generate cloud-init/user-data.yaml
-#   make deploy        # generate + create secret + apply the Harvester build host
-#   make logs          # follow the build log on the build host
-#   make local-build   # build on this machine via libvirt instead of Harvester
+#   make config           # create build/config.env from the template, then edit it
+#   make build-local      # ...or build-harvester (then `make logs` to follow it)
+# (build-local / build-harvester each download their own assets; `make assets`
+#  just pre-caches them here and is optional.)
 
 SHELL := /bin/bash
 
@@ -34,7 +38,11 @@ help: ## Show this help
 	@echo "Coriolis Windows worker builder — make targets:"
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | sort \
-	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Two build paths produce the same image — pick ONE:"
+	@echo "  build-local      build here with local KVM/libvirt"
+	@echo "  build-harvester  build on a throwaway Harvester build-host VM"
 
 # --- local config ----------------------------------------------------------
 .PHONY: config
@@ -57,14 +65,15 @@ config: ## Create build/config.env + config.secret.env from the examples (won't 
 cloud-init: ## (Re)generate cloud-init/user-data.yaml from build/ + windows/
 	./generate-cloud-init.sh
 
-# --- Harvester deploy ------------------------------------------------------
-.PHONY: deploy
-deploy: cloud-init ## Generate cloud-init, (re)create the secret, apply the build-host VM
+# --- Harvester build -------------------------------------------------------
+.PHONY: build-harvester
+build-harvester: cloud-init ## Build the worker qcow2 on a Harvester build-host VM (generate cloud-init + secret + apply)
 	kubectl -n $(NS) create secret generic $(SECRET) \
 	  --from-file=userdata=$(USER_DATA) \
 	  --from-literal=networkdata='' \
 	  --dry-run=client -o yaml | kubectl apply -f -
-	kubectl apply -f harvester/leap-build-host.yaml
+	kubectl apply -f harvester/leap-image.yaml
+	./harvester/apply-with-storageclass.sh $(NS) opensuse-leap-16-cloud harvester/leap-build-host.yaml
 	@echo "Build host applied. Follow progress with: make logs"
 
 .PHONY: logs
@@ -80,7 +89,8 @@ destroy: ## Delete the Harvester build-host VM and its cloud-init secret
 # --- smoke test ------------------------------------------------------------
 .PHONY: smoke-test
 smoke-test: ## Boot the built image in an isolated test namespace (does it come up on virtio?)
-	kubectl apply -f harvester/worker-vm.yaml
+	kubectl create namespace $(TEST_NS) --dry-run=client -o yaml | kubectl apply -f -
+	./harvester/apply-with-storageclass.sh $(TEST_NS) $(TEST_VM) harvester/worker-vm.yaml
 	@echo "Watch:   kubectl -n $(TEST_NS) get vmi $(TEST_VM) -w"
 	@echo "Console: virtctl vnc -n $(TEST_NS) $(TEST_VM)"
 
@@ -93,8 +103,8 @@ smoke-clean: ## Tear down the smoke-test namespace
 assets: ## Download the Windows ISO, VMDP ISO and cloudbase-init MSI
 	./build/download-assets.sh
 
-.PHONY: local-build
-local-build: ## Build the worker qcow2 locally via libvirt (no Harvester)
+.PHONY: build-local
+build-local: ## Build the worker qcow2 here with local KVM/libvirt (no Harvester)
 	./build/build-worker.sh
 
 # --- housekeeping ----------------------------------------------------------
