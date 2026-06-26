@@ -50,6 +50,29 @@ virsh list --all >/dev/null 2>&1 || {
 
 mkdir -p "$ASSETS_DIR" "$OUTPUT_DIR"
 
+# qemu:///system runs QEMU as the 'qemu' user (uid 107), not as us. WORKDIR
+# lives under $HOME, which is mode 0700, so that user can't even traverse into
+# it to open the disk images — libvirt aborts with "Cannot access storage file
+# ... (as uid:107, gid:107): Permission denied". Grant search (o+x) on every
+# directory on the path so qemu can reach the files. The images themselves stay
+# 0644 (world-readable), so o+x on the path is enough and we never expose
+# directory *listings* to other local users.
+#
+# Walk each ancestor up to '/' rather than assuming WORKDIR is exactly one level
+# below $HOME — a custom WORKDIR (e.g. /mnt/big/builds/...) can nest arbitrarily,
+# and any single un-traversable component on the chain blocks qemu. chmod fails
+# silently on components we don't own (already o+x for system dirs anyway).
+grant_traverse() {
+    local d; d="$(cd "$1" && pwd)" || return 0   # canonicalize; skip if gone
+    while [[ "$d" != "/" && -n "$d" ]]; do
+        chmod o+x "$d" 2>/dev/null || true
+        d="$(dirname "$d")"
+    done
+}
+for d in "$WORKDIR" "$ASSETS_DIR" "$OUTPUT_DIR"; do
+    grant_traverse "$d"
+done
+
 # --- 1. assets -------------------------------------------------------------
 log "Step 1/5: downloading assets"
 bash "$HERE/download-assets.sh"
