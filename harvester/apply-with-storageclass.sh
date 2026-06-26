@@ -18,6 +18,13 @@ MANIFEST=${3:?manifest path required}
 
 TIMEOUT=${IMAGE_IMPORT_TIMEOUT:-600}   # seconds to wait for the image to import
 
+# Pick up BUILD_NETWORK (the Multus NAD the VM attaches to) from config.env so
+# the network is configurable in one place. Env overrides the file; fall back to
+# the lab LAN bridge if neither is set.
+_CONFIG_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")/../build" && pwd)/config.env"
+[[ -f "$_CONFIG_ENV" ]] && source "$_CONFIG_ENV"
+BUILD_NETWORK="${BUILD_NETWORK:-default/local-network}"
+
 echo "Waiting (up to ${TIMEOUT}s) for image ${IMG_NS}/${IMG_NAME} storage class..."
 deadline=$(( $(date +%s) + TIMEOUT ))
 sc=""
@@ -34,4 +41,7 @@ while :; do
 done
 
 echo "Resolved storage class: ${sc}"
-sed "s/__IMAGE_STORAGECLASS__/${sc}/g" "$MANIFEST" | kubectl apply -f -
+echo "Attaching VM to network: ${BUILD_NETWORK}"
+sed -e "s/__IMAGE_STORAGECLASS__/${sc}/g" \
+    -e "s#__BUILD_NETWORK__#${BUILD_NETWORK}#g" \
+    "$MANIFEST" | kubectl apply -f -

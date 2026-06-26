@@ -69,8 +69,11 @@ spec:
               disk:
                 bus: virtio
           interfaces:
+            # Bridge onto the lab LAN (DHCP 192.168.86.x) like the other lab VMs,
+            # instead of pod masquerade which lands on the pod CIDR (10.52.x) and
+            # isn't reachable from the LAN.
             - name: default
-              masquerade: {}
+              bridge: {}
               model: virtio
         resources:
           requests:
@@ -78,7 +81,8 @@ spec:
             cpu: "8"
       networks:
         - name: default
-          pod: {}
+          multus:
+            networkName: __BUILD_NETWORK__   # from BUILD_NETWORK in build/config.env
       volumes:
         - name: rootdisk
           persistentVolumeClaim:
