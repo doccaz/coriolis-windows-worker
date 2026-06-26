@@ -20,8 +20,12 @@ SHELL := /bin/bash
 NS              ?= default
 SECRET          ?= coriolis-builder-cloudinit
 BUILD_VM        ?= coriolis-worker-builder
+BUILD_PVC       ?= coriolis-builder-root
 TEST_NS         ?= coriolis-worker-test
 TEST_VM         ?= coriolis-windows-worker
+# virtctl is only needed to reach a VM console (make logs / smoke-test). Match
+# your cluster: kubectl get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}'
+KUBEVIRT_VERSION ?= v1.7.0
 
 # --- Paths -----------------------------------------------------------------
 USER_DATA       := cloud-init/user-data.yaml
@@ -77,14 +81,28 @@ build-harvester: cloud-init ## Build the worker qcow2 on a Harvester build-host 
 	@echo "Build host applied. Follow progress with: make logs"
 
 .PHONY: logs
-logs: ## Tail the build log on the Harvester build-host VM (needs virtctl)
-	@echo "On the build host run: tail -f ~builder/coriolis-worker-build/coriolis-build.log"
-	@echo "Console: virtctl vnc -n $(NS) $(BUILD_VM)   (or: virtctl console -n $(NS) $(BUILD_VM))"
+logs: ## Open the build-host VM console to follow the build log (needs virtctl)
+	@command -v virtctl >/dev/null 2>&1 || { \
+	  echo "virtctl not found — it's how you reach the build VM (the log lives *inside* it,"; \
+	  echo "not on this machine). Install it, matching your cluster's KubeVirt $(KUBEVIRT_VERSION):"; \
+	  echo "    curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/$(KUBEVIRT_VERSION)/virtctl-$(KUBEVIRT_VERSION)-linux-amd64"; \
+	  echo "    chmod +x virtctl && sudo mv virtctl /usr/local/bin/"; \
+	  echo "  (or grab it from the Harvester UI: Support > Download virtctl), then rerun 'make logs'."; \
+	  exit 1; \
+	}
+	@echo "Opening the $(BUILD_VM) console. Log in as builder/builder, then run:"
+	@echo "    tail -f ~builder/coriolis-worker-build/coriolis-build.log"
+	@echo "Leave the console with Ctrl-] . Falling back to VNC: virtctl vnc -n $(NS) $(BUILD_VM)"
+	virtctl console -n $(NS) $(BUILD_VM)
 
 .PHONY: destroy
-destroy: ## Delete the Harvester build-host VM and its cloud-init secret
-	-kubectl delete -f harvester/leap-build-host.yaml
-	-kubectl -n $(NS) delete secret $(SECRET)
+destroy: ## Delete the Harvester build-host VM, its root PVC and cloud-init secret
+	# Delete the VM first and wait for the VMI to terminate — otherwise the volume
+	# is still attached and Harvester's webhook refuses to delete the PVC.
+	-kubectl -n $(NS) delete vm $(BUILD_VM) --ignore-not-found
+	-kubectl -n $(NS) wait --for=delete vmi/$(BUILD_VM) --timeout=120s
+	-kubectl -n $(NS) delete pvc $(BUILD_PVC) --ignore-not-found
+	-kubectl -n $(NS) delete secret $(SECRET) --ignore-not-found
 
 # --- smoke test ------------------------------------------------------------
 .PHONY: smoke-test
@@ -93,6 +111,7 @@ smoke-test: ## Boot the built image in an isolated test namespace (does it come 
 	./harvester/apply-with-storageclass.sh $(TEST_NS) $(TEST_VM) harvester/worker-vm.yaml
 	@echo "Watch:   kubectl -n $(TEST_NS) get vmi $(TEST_VM) -w"
 	@echo "Console: virtctl vnc -n $(TEST_NS) $(TEST_VM)"
+	@command -v virtctl >/dev/null 2>&1 || echo "         (no virtctl? install it: https://github.com/kubevirt/kubevirt/releases/download/$(KUBEVIRT_VERSION)/virtctl-$(KUBEVIRT_VERSION)-linux-amd64 — or see 'make logs')"
 
 .PHONY: smoke-clean
 smoke-clean: ## Tear down the smoke-test namespace
