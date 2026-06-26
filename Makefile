@@ -21,7 +21,7 @@ NS              ?= default
 SECRET          ?= coriolis-builder-cloudinit
 BUILD_VM        ?= coriolis-worker-builder
 BUILD_PVC       ?= coriolis-builder-root
-TEST_NS         ?= coriolis-worker-test
+TEST_NS         ?= default
 TEST_VM         ?= coriolis-windows-worker
 # virtctl is only needed to reach a VM console (make logs / smoke-test). Match
 # your cluster: kubectl get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}'
@@ -142,16 +142,23 @@ destroy: ## Delete the Harvester build-host VM, its root PVC and cloud-init secr
 
 # --- smoke test ------------------------------------------------------------
 .PHONY: smoke-test
-smoke-test: ## Boot the built image in an isolated test namespace (does it come up on virtio?)
-	kubectl create namespace $(TEST_NS) --dry-run=client -o yaml | kubectl apply -f -
+smoke-test: ## Boot the built image in a test namespace (does it come up on virtio?)
+	# apply-with-storageclass.sh creates the namespace via the manifest; only
+	# pre-create it when it's a dedicated (non-default) one.
+	@[ "$(TEST_NS)" = default ] || kubectl create namespace $(TEST_NS) --dry-run=client -o yaml | kubectl apply -f -
 	./harvester/apply-with-storageclass.sh $(TEST_NS) $(TEST_VM) harvester/worker-vm.yaml
 	@echo "Watch:   kubectl -n $(TEST_NS) get vmi $(TEST_VM) -w"
 	@echo "Console: virtctl vnc -n $(TEST_NS) $(TEST_VM)"
 	@command -v virtctl >/dev/null 2>&1 || echo "         (no virtctl? install it: https://github.com/kubevirt/kubevirt/releases/download/$(KUBEVIRT_VERSION)/virtctl-$(KUBEVIRT_VERSION)-linux-amd64 — or see 'make logs')"
 
 .PHONY: smoke-clean
-smoke-clean: ## Tear down the smoke-test namespace
-	-kubectl delete ns $(TEST_NS)
+smoke-clean: ## Tear down the smoke-test VM, its disk PVC (keeps the namespace)
+	# Delete the VM first and wait for the VMI to terminate, otherwise the volume
+	# is still attached and Harvester's webhook refuses to delete the PVC. We do
+	# NOT delete the namespace: TEST_NS defaults to `default`, which must survive.
+	-kubectl -n $(TEST_NS) delete vm $(TEST_VM) --ignore-not-found
+	-kubectl -n $(TEST_NS) wait --for=delete vmi/$(TEST_VM) --timeout=120s
+	-kubectl -n $(TEST_NS) delete pvc $(TEST_VM)-disk --ignore-not-found
 
 # --- local (libvirt) build -------------------------------------------------
 .PHONY: assets

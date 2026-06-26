@@ -162,14 +162,28 @@ if (-not $scsiSvc) {
 Set-BootCritical $blkSvc  $blkIds
 Set-BootCritical $scsiSvc $scsiIds
 
-# QEMU guest agent: install from the VMDP CD if a stand-alone MSI is shipped.
-$qemuGaMsi = Find-OnVolumes 'qemu-ga-x86_64.msi'
-if (-not $qemuGaMsi) { $qemuGaMsi = Find-OnVolumes 'guest-agent\qemu-ga-x86_64.msi' }
-if ($qemuGaMsi) {
-    Log "Installing QEMU guest agent: $qemuGaMsi"
-    Start-Process msiexec.exe -ArgumentList "/i `"$qemuGaMsi`" /qn /norestart" -Wait
+# QEMU guest agent: VMDP ships it as loose binaries (no MSI), staged by the
+# build into C:\coriolis-build\qemu-ga. Installing it lets Harvester/KubeVirt
+# report the guest's IP (the agent talks over the org.qemu.guest_agent.0 vport);
+# Coriolis itself drives the worker over WinRM, so this is for visibility.
+$gaSrc = "$Base\qemu-ga"
+if (Test-Path "$gaSrc\qemu-ga.exe") {
+    $gaDir = Join-Path $Env:ProgramFiles 'qemu-ga'
+    New-Item -ItemType Directory -Force -Path $gaDir | Out-Null
+    # Copy exe + the mingw64 runtime DLLs it depends on into a stable location.
+    Copy-Item "$gaSrc\*" $gaDir -Recurse -Force
+    Log "Installing QEMU guest agent from $gaDir"
+    # -s install registers the 'qemu-ga' service (QEMU Guest Agent).
+    & "$gaDir\qemu-ga.exe" -s install 2>&1 | ForEach-Object { Log "  qemu-ga: $_" }
+    Set-Service -Name qemu-ga -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name qemu-ga -ErrorAction SilentlyContinue
+    if (Get-Service -Name qemu-ga -ErrorAction SilentlyContinue) {
+        Log 'QEMU guest agent installed and started.'
+    } else {
+        Log 'WARNING: qemu-ga service did not register; Harvester may not show the IP.'
+    }
 } else {
-    Log 'QEMU guest agent MSI not found on media (drivers are sufficient for Coriolis).'
+    Log "QEMU guest agent binaries not found at $gaSrc; Harvester won't show the guest IP."
 }
 
 # ---------------------------------------------------------------------------
@@ -235,6 +249,19 @@ New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformati
 # cloudbase-init's default user is "Admin"; Coriolis requires the built-in
 # Administrator to stay ENABLED in the worker image.
 & net user Administrator /active:yes | Out-Null
+
+# Don't force a password change at first interactive logon and don't let the
+# password expire. Sysprep/OOBE otherwise flags the built-in Administrator, so
+# the deployed worker greets you with a "change the password" screen that blocks
+# console/automated logon with the build password.
+& net user Administrator /logonpasswordchg:no 2>$null | Out-Null
+try {
+    $admin = [ADSI]'WinNT://./Administrator,user'
+    $admin.PasswordExpired = 0            # clear "must change at next logon"
+    $admin.UserFlags.Value = $admin.UserFlags.Value -bor 0x10000  # DONT_EXPIRE_PASSWD
+    $admin.SetInfo()
+    Log 'Administrator password set to never expire / no forced change.'
+} catch { Log "  WARNING: could not clear Administrator password expiry: $($_.Exception.Message)" }
 
 # Enable RDP (handy for debugging a stuck worker) and disable hibernation.
 Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0

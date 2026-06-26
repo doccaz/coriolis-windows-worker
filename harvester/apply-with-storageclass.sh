@@ -41,7 +41,9 @@ while :; do
 done
 
 echo "Resolved storage class: ${sc}"
+echo "Deploying into namespace: ${IMG_NS}"
 echo "Attaching VM to network: ${BUILD_NETWORK}"
 sed -e "s/__IMAGE_STORAGECLASS__/${sc}/g" \
     -e "s#__BUILD_NETWORK__#${BUILD_NETWORK}#g" \
+    -e "s#__TEST_NS__#${IMG_NS}#g" \
     "$MANIFEST" | kubectl apply -f -

@@ -3,7 +3,7 @@
 # Windows install. It carries:
 #   /autounattend.xml                    (token-substituted answer file)
 #   /toolkit/*                           (configure-worker.ps1, cloudbase confs,
-#                                         cloudbase-init MSI)
+#                                         cloudbase-init MSI, qemu-ga binaries)
 #   /drivers/*                           (every virtio .inf extracted from VMDP)
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -59,6 +59,20 @@ if [[ "$inf_found" -eq 0 ]]; then
 fi
 # Put a copy of the drivers under \toolkit so xcopy carries them to C:.
 cp -a "$STAGE/drivers" "$STAGE/toolkit/drivers"
+
+# Stage the QEMU guest agent (VMDP ships it as loose binaries, not an MSI). With
+# it installed, Harvester/KubeVirt can report the guest's IP; without it the
+# agent channel stays silent. configure-worker.ps1 installs it from C:\coriolis-
+# build\qemu-ga. qemu-ga.exe (x64) is linked against the mingw 64-bit runtime
+# DLLs shipped beside it, so place those next to the exe.
+if [[ -f "$VMDP_MNT/qemu-ga/x64/qemu-ga.exe" ]]; then
+    echo ">> Staging QEMU guest agent (x64 + mingw64 runtime) from VMDP ISO"
+    mkdir -p "$STAGE/toolkit/qemu-ga"
+    cp -a "$VMDP_MNT/qemu-ga/x64/."     "$STAGE/toolkit/qemu-ga/"
+    cp -a "$VMDP_MNT/qemu-ga/mingw64/." "$STAGE/toolkit/qemu-ga/" 2>/dev/null || true
+else
+    echo "!! qemu-ga not found on VMDP ISO — Harvester won't report the guest IP."
+fi
 cleanup_mnt
 trap 'chmod -R u+w "$STAGE" 2>/dev/null; rm -rf "$STAGE"' EXIT
 echo ">> Bundled $inf_found virtio .inf driver folder(s)."

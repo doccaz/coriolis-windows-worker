@@ -6,35 +6,40 @@
 # its own instance from the registered image. This is just a "does it boot?"
 # check, deployed in an isolated namespace.
 #
-# Prereqs (upload the image into the SAME namespace + name referenced below):
+# Prereqs: the image must already exist in the namespace you test in (TEST_NS,
+# default coriolis-worker-test). Either upload it there directly:
 #   UPLOAD_TO_HARVESTER=true \
 #   HARVESTER_NAMESPACE=coriolis-worker-test \
 #   HARVESTER_IMAGE_NAME=coriolis-windows-worker \
 #   HARVESTER_SERVER=https://192.168.86.250 HARVESTER_TOKEN=... \
 #   ./build/upload-to-harvester.sh <image.qcow2>
+# ...or point the smoke-test at wherever the image already lives, e.g. if you
+# uploaded to `default`:  make smoke-test TEST_NS=default
 #
-# Harvester's per-image storage class name is auto-generated (lh-<uuid>), NOT
-# longhorn-<image name>. The __IMAGE_STORAGECLASS__ placeholder below is resolved
-# at apply time from the uploaded image's .status.storageClassName.
+# Placeholders below are substituted at apply time by apply-with-storageclass.sh:
+#   __TEST_NS__            → the namespace passed to the script (TEST_NS)
+#   __IMAGE_STORAGECLASS__ → image's auto-generated storage class (lh-<uuid>),
+#                            NOT longhorn-<image name>; read from its status
+#   __BUILD_NETWORK__      → BUILD_NETWORK from build/config.env
 #
-# Apply (resolves + substitutes the storage class for you):
+# Apply (resolves + substitutes everything for you):
 #   make smoke-test
-#   # then: virtctl vnc -n coriolis-worker-test coriolis-windows-worker
+#   # then: virtctl vnc -n <TEST_NS> coriolis-windows-worker
 # =============================================================================
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: coriolis-worker-test
+  name: __TEST_NS__
 ---
 # Boot disk, cloned from the uploaded worker image.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: coriolis-windows-worker-disk
-  namespace: coriolis-worker-test
+  namespace: __TEST_NS__
   annotations:
-    harvesterhci.io/imageId: coriolis-worker-test/coriolis-windows-worker
+    harvesterhci.io/imageId: __TEST_NS__/coriolis-windows-worker
 spec:
   accessModes:
     - ReadWriteMany
@@ -43,7 +48,7 @@ spec:
       storage: 50Gi          # >= the image's virtual size (40G worker disk)
   volumeMode: Block
   # Auto-generated per-image storage class (lh-<uuid>), resolved at apply time
-  # from `kubectl -n coriolis-worker-test get vmimage coriolis-windows-worker \
+  # from `kubectl -n <TEST_NS> get vmimage coriolis-windows-worker \
   #   -o jsonpath={.status.storageClassName}`.
   storageClassName: __IMAGE_STORAGECLASS__
 ---
@@ -51,7 +56,7 @@ apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
   name: coriolis-windows-worker
-  namespace: coriolis-worker-test
+  namespace: __TEST_NS__
   labels:
     harvesterhci.io/creator: harvester
 spec:
@@ -65,7 +70,7 @@ spec:
         machine:
           type: q35            # image was built on q35 (SeaBIOS / MBR)
         cpu:
-          cores: 2
+          cores: 4
         memory:
           guest: 4Gi
         features:
@@ -108,7 +113,7 @@ spec:
         resources:
           requests:
             memory: 4Gi
-            cpu: "2"
+            cpu: "4"
       networks:
         - name: default
           multus:
