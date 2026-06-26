@@ -206,12 +206,21 @@ kubectl delete ns coriolis-worker-test
 
 ## Point Coriolis at the image
 
-1. Register `coriolis-windows-worker.qcow2` as a Harvester image. Use a
-   **virtio-scsi** (or virtio-blk) boot bus — both are covered.
-2. In your Coriolis Harvester/KubeVirt endpoint, set the temporary worker image
-   to this image. Coriolis boots it during migration, cloudbase-init injects the
-   admin password + sets up the WinRM HTTPS listener, and Coriolis connects on
-   `:5986` with Basic auth to perform the Windows OS morphing / driver injection.
+1. Register `coriolis-windows-worker.qcow2` as a Harvester image, **in the same
+   namespace your Coriolis target endpoint uses** (e.g. `labs`) — Coriolis only
+   lists images from there. `upload-to-harvester.sh` does this for you.
+2. The image **must carry the `harvesterhci.io/os-type: windows` label**, or it
+   will not appear in the Coriolis wizard's *Migration Image Map → Windows*
+   dropdown. The Harvester UI sets this label when you pick an OS type; a raw API
+   upload does not — so `upload-to-harvester.sh` sets it explicitly
+   (`HARVESTER_IMAGE_OS_TYPE`). If you registered the image some other way and it
+   doesn't show up, this missing label is almost certainly why.
+3. In the Coriolis migration wizard (*Target Options*), open *Migration Image
+   Map* and select this image for the **Windows** row, then click **Reload
+   Options** if you just uploaded it (the list is cached at page load). Coriolis
+   boots it during migration, cloudbase-init injects the admin password + sets up
+   the WinRM HTTPS listener, and Coriolis connects on `:5986` with Basic auth to
+   perform the Windows OS morphing / driver injection.
 
 ## Configuration
 

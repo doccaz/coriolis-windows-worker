@@ -26,6 +26,9 @@ command -v curl >/dev/null || { echo "Missing 'curl'" >&2; exit 1; }
 SERVER="${HARVESTER_SERVER%/}"
 NS="$HARVESTER_NAMESPACE"
 NAME="$HARVESTER_IMAGE_NAME"
+# Image labels (default here so an older config.env without these still works).
+HARVESTER_IMAGE_OS_TYPE="${HARVESTER_IMAGE_OS_TYPE:-windows}"
+HARVESTER_IMAGE_TYPE="${HARVESTER_IMAGE_TYPE:-raw_qcow2}"
 SIZE="$(stat -c%s "$IMG")"
 K=(); [[ "$HARVESTER_INSECURE" == "true" ]] && K=(-k)
 AUTH=(-H "Authorization: Bearer $HARVESTER_TOKEN")
@@ -70,10 +73,18 @@ if curl -fsS "${K[@]}" "${AUTH[@]}" "$OBJ" >/dev/null 2>&1; then
         exit 1
     fi
 fi
+# Labels: Coriolis's Migration Image Map filters worker images by the
+# `harvesterhci.io/os-type` label. The Harvester UI sets it when you pick an OS
+# type, but a raw API upload does not — so without this the image never appears
+# as a selectable Windows worker in the Coriolis wizard. (Values must be
+# label-safe: alphanumeric, '-', '_', '.'.)
 body="$(jq -nc \
     --arg ns "$NS" --arg name "$NAME" --arg disp "$HARVESTER_IMAGE_DISPLAY" \
+    --arg ostype "$HARVESTER_IMAGE_OS_TYPE" --arg imgtype "$HARVESTER_IMAGE_TYPE" \
     '{type:"harvesterhci.io.virtualmachineimage",
-      metadata:{namespace:$ns,name:$name},
+      metadata:{namespace:$ns,name:$name,
+                labels:{"harvesterhci.io/os-type":$ostype,
+                        "harvesterhci.io/image-type":$imgtype}},
       spec:{displayName:$disp,sourceType:"upload"}}')"
 curl -fsS "${K[@]}" "${AUTH[@]}" -H 'Content-Type: application/json' \
     -X POST "$COLL" -d "$body" >/dev/null
