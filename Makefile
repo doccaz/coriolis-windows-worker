@@ -103,6 +103,13 @@ logs: _need-virtctl ## SSH into the build host and follow the build log (needs v
 	@echo "SSH into $(BUILD_VM) as $(SSH_USER) (key $(SSH_KEY)) and tailing the build log."
 	@echo "If this fails with a key error, the VM may predate the key — redeploy ('make build-harvester')"
 	@echo "or fall back to the console: make console"
+	@echo "Waiting for $(BUILD_VM) to come up and start logging (Ctrl-C to stop waiting)..."
+	@while ! virtctl ssh -n $(NS) -i $(SSH_KEY) --username $(SSH_USER) $(SSH_HOST_OPTS) \
+	  -c 'test -f $(BUILD_LOG)' vm/$(BUILD_VM) >/dev/null 2>&1; do \
+	  echo "  not ready yet (VM booting / no network / log not created); retrying in 5s..."; \
+	  sleep 5; \
+	done
+	@echo "Reachable and log present — following $(BUILD_LOG):"
 	virtctl ssh -n $(NS) -i $(SSH_KEY) --username $(SSH_USER) $(SSH_HOST_OPTS) \
 	  -c 'tail -n +1 -F $(BUILD_LOG)' vm/$(BUILD_VM)
 
