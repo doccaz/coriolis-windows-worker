@@ -35,6 +35,11 @@ KUBEVIRT_VERSION ?= v1.7.0
 SSH_USER        ?= builder
 SSH_KEY         ?= $(firstword $(wildcard $(HOME)/.ssh/id_ed25519) $(wildcard $(HOME)/.ssh/id_rsa))
 BUILD_LOG       ?= ~/coriolis-worker-build/coriolis-build.log
+# The build host is throwaway and regenerates its SSH host key on every redeploy,
+# so a pinned known_hosts entry just produces a confirm prompt (first deploy) or a
+# host-key-changed error (re-deploy). virtctl uses the local OpenSSH client, so we
+# pass it through: don't verify or record host keys for this ephemeral VM.
+SSH_HOST_OPTS   ?= -t "-o StrictHostKeyChecking=no" -t "-o UserKnownHostsFile=/dev/null" -t "-o LogLevel=ERROR"
 
 # --- Paths -----------------------------------------------------------------
 USER_DATA       := cloud-init/user-data.yaml
@@ -98,8 +103,8 @@ logs: _need-virtctl ## SSH into the build host and follow the build log (needs v
 	@echo "SSH into $(BUILD_VM) as $(SSH_USER) (key $(SSH_KEY)) and tailing the build log."
 	@echo "If this fails with a key error, the VM may predate the key — redeploy ('make build-harvester')"
 	@echo "or fall back to the console: make console"
-	virtctl ssh -n $(NS) -i $(SSH_KEY) --username $(SSH_USER) \
-	  -c 'tail -n +1 -F $(BUILD_LOG)' $(BUILD_VM)
+	virtctl ssh -n $(NS) -i $(SSH_KEY) --username $(SSH_USER) $(SSH_HOST_OPTS) \
+	  -c 'tail -n +1 -F $(BUILD_LOG)' vm/$(BUILD_VM)
 
 .PHONY: console
 console: _need-virtctl ## Fallback: open the build-host serial console (log in builder/builder, then tail the log)

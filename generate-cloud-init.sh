@@ -89,11 +89,44 @@ fi
 
 cat >> "$OUT" <<'HEADER'
 
+# The Leap 16.0 Minimal-VM Cloud image ships with NO zypper repositories
+# (/etc/zypp/repos.d is empty), so the package install below has nothing to pull
+# from and cloud-init fails before the build can start. Seed the OSS + non-OSS
+# repos here. cloud-init's zypper module runs in the config stage *before*
+# package_update_upgrade_install, and the openSUSE Project signing key is already
+# trusted in the image's rpm keyring, so gpgcheck passes without a prompt.
+zypper:
+  repos:
+    - id: repo-oss
+      name: openSUSE-Leap-16.0-OSS
+      baseurl: https://download.opensuse.org/distribution/leap/16.0/repo/oss/
+      enabled: 1
+      autorefresh: 1
+      gpgcheck: 1
+    - id: repo-non-oss
+      name: openSUSE-Leap-16.0-NON-OSS
+      baseurl: https://download.opensuse.org/distribution/leap/16.0/repo/non-oss/
+      enabled: 1
+      autorefresh: 1
+      gpgcheck: 1
+
 package_update: true
 packages:
+  # The Leap 16.0 Minimal-VM Cloud image ships the stripped 'kernel-default-base'
+  # flavor, which omits the KVM modules (kvm_amd/kvm_intel). Without them the
+  # guest can't create /dev/kvm even though the host surfaces vmx/svm, so the
+  # nested build can't run. Pull the full 'kernel-default' (carries the kvm
+  # modules); the power_state reboot below boots into it so /dev/kvm appears.
+  - kernel-default
   - qemu-kvm
   - libvirt
   - libvirt-client
+  # libvirt's qemu:///system access driver is polkit. Without polkit installed,
+  # root connects (uid 0 bypasses it) but the unprivileged 'builder' gets a
+  # D-Bus "ServiceUnknown: not activatable" and the build can't reach libvirt —
+  # even though it's in the 'libvirt' group. polkit ships the 50-libvirt.rules
+  # that actually grants that group, so it must be present on this minimal image.
+  - polkit
   - virt-install
   - qemu-tools
   - xorriso
@@ -134,11 +167,23 @@ runcmd:
   - [ bash, -c, "usermod -aG libvirt,kvm builder" ]
   - [ chown, -R, "builder:builder", /opt/coriolis-worker ]
   - [ systemctl, daemon-reload ]
-  # Auto-start the build (runs as 'builder'). Comment this out to build manually:
+  # Enable (don't --now) the build: the running kernel is still the stripped
+  # 'kernel-default-base' with no /dev/kvm, so starting now would just fail fast.
+  # power_state reboots into the freshly-installed full kernel-default below, and
+  # the service (WantedBy=multi-user.target) starts on that boot with /dev/kvm
+  # present. Comment this out to build manually:
   #   sudo -u builder /opt/coriolis-worker/build/build-worker.sh
-  - [ systemctl, enable, --now, coriolis-build.service ]
+  - [ systemctl, enable, coriolis-build.service ]
 
-final_message: "Coriolis worker build host ready. Tail /home/builder/coriolis-worker-build/coriolis-build.log for progress."
+# Reboot once cloud-init finishes so the box comes up on the full kernel-default
+# (with kvm_amd/kvm_intel) instead of kernel-default-base. The enabled
+# coriolis-build.service then runs on the KVM-capable kernel.
+power_state:
+  mode: reboot
+  message: "Rebooting into full kernel-default so /dev/kvm is available for the nested build"
+  condition: true
+
+final_message: "Coriolis worker build host rebooting into kernel-default; the build starts on next boot. Tail /home/builder/coriolis-worker-build/coriolis-build.log for progress."
 FOOTER
 
 echo "Wrote $OUT"
