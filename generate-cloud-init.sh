@@ -36,6 +36,21 @@ emit_file() {
     } >> "$OUT"
 }
 
+# Resolve an SSH public key to authorize for the 'builder' user, so `make logs`
+# can log in over `virtctl ssh` non-interactively (no password prompt). Honour an
+# explicit BUILD_SSH_PUBKEY, else auto-detect the operator's default key. Absent
+# = key login disabled; the builder/builder password still works on the console.
+PUBKEY=""
+if [[ -n "${BUILD_SSH_PUBKEY:-}" ]]; then
+    [[ -f "$BUILD_SSH_PUBKEY" ]] || { echo "ERROR: BUILD_SSH_PUBKEY not found: $BUILD_SSH_PUBKEY" >&2; exit 1; }
+    PUBKEY="$(< "$BUILD_SSH_PUBKEY")"
+else
+    for cand in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub"; do
+        [[ -f "$cand" ]] && { PUBKEY="$(< "$cand")"; echo "note: authorizing SSH key $cand for 'builder' (override with BUILD_SSH_PUBKEY)." >&2; break; }
+    done
+    [[ -z "$PUBKEY" ]] && echo "note: no SSH public key found — 'make logs' will need the builder/builder console password. Set BUILD_SSH_PUBKEY to enable key login." >&2
+fi
+
 cat > "$OUT" <<'HEADER'
 #cloud-config
 # =============================================================================
@@ -62,6 +77,17 @@ users:
     plain_text_passwd: builder
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
+HEADER
+
+# Authorize the resolved key (if any) for key-based `virtctl ssh` login.
+if [[ -n "$PUBKEY" ]]; then
+    {
+        echo "    ssh_authorized_keys:"
+        echo "      - $PUBKEY"
+    } >> "$OUT"
+fi
+
+cat >> "$OUT" <<'HEADER'
 
 package_update: true
 packages:

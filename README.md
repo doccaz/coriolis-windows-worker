@@ -99,7 +99,10 @@ kubectl apply -f harvester/leap-image.yaml
   harvester/leap-build-host.yaml
 
 # 3. Watch the build (≈ 30–90 min depending on download speed + nested-virt perf)
-#    SSH/console into the build host as 'builder' (password: builder), then:
+#    `make logs` SSHes in (via `virtctl ssh`, tunnelled through the KubeVirt API —
+#    no route to the VM needed) and tails the log for you. It authorizes your
+#    ~/.ssh/id_ed25519.pub or id_rsa.pub (override with BUILD_SSH_PUBKEY) at
+#    cloud-init time. No key? `make console` logs in as builder/builder, then:
 tail -f ~/coriolis-worker-build/coriolis-build.log
 ```
 

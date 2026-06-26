@@ -27,6 +27,15 @@ TEST_VM         ?= coriolis-windows-worker
 # your cluster: kubectl get kubevirt -A -o jsonpath='{.items[0].status.observedKubeVirtVersion}'
 KUBEVIRT_VERSION ?= v1.7.0
 
+# `make logs` logs into the build host as this user over `virtctl ssh` (which
+# tunnels SSH through the KubeVirt API — no direct network route to the VM
+# needed). The matching public key is authorized by cloud-init; auto-detect the
+# private key, override with SSH_KEY=... . generate-cloud-init.sh picks the
+# *.pub of the same default keys (override there with BUILD_SSH_PUBKEY).
+SSH_USER        ?= builder
+SSH_KEY         ?= $(firstword $(wildcard $(HOME)/.ssh/id_ed25519) $(wildcard $(HOME)/.ssh/id_rsa))
+BUILD_LOG       ?= ~/coriolis-worker-build/coriolis-build.log
+
 # --- Paths -----------------------------------------------------------------
 USER_DATA       := cloud-init/user-data.yaml
 CONFIG          := build/config.env
@@ -81,19 +90,34 @@ build-harvester: cloud-init ## Build the worker qcow2 on a Harvester build-host 
 	@echo "Build host applied. Follow progress with: make logs"
 
 .PHONY: logs
-logs: ## Open the build-host VM console to follow the build log (needs virtctl)
+logs: _need-virtctl ## SSH into the build host and follow the build log (needs virtctl + an authorized SSH key)
+	@[ -n "$(SSH_KEY)" ] || { \
+	  echo "No SSH private key found (~/.ssh/id_ed25519 or id_rsa). Set SSH_KEY=/path/to/key,"; \
+	  echo "or use 'make console' to log in with the builder/builder password instead."; \
+	  exit 1; }
+	@echo "SSH into $(BUILD_VM) as $(SSH_USER) (key $(SSH_KEY)) and tailing the build log."
+	@echo "If this fails with a key error, the VM may predate the key — redeploy ('make build-harvester')"
+	@echo "or fall back to the console: make console"
+	virtctl ssh -n $(NS) -i $(SSH_KEY) --username $(SSH_USER) \
+	  -c 'tail -n +1 -F $(BUILD_LOG)' $(BUILD_VM)
+
+.PHONY: console
+console: _need-virtctl ## Fallback: open the build-host serial console (log in builder/builder, then tail the log)
+	@echo "Opening the $(BUILD_VM) console. Log in as builder/builder, then run:"
+	@echo "    tail -f ~builder/coriolis-worker-build/coriolis-build.log"
+	@echo "Leave the console with Ctrl-] . Falling back to VNC: virtctl vnc -n $(NS) $(BUILD_VM)"
+	virtctl console -n $(NS) $(BUILD_VM)
+
+.PHONY: _need-virtctl
+_need-virtctl:
 	@command -v virtctl >/dev/null 2>&1 || { \
 	  echo "virtctl not found — it's how you reach the build VM (the log lives *inside* it,"; \
 	  echo "not on this machine). Install it, matching your cluster's KubeVirt $(KUBEVIRT_VERSION):"; \
 	  echo "    curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/$(KUBEVIRT_VERSION)/virtctl-$(KUBEVIRT_VERSION)-linux-amd64"; \
 	  echo "    chmod +x virtctl && sudo mv virtctl /usr/local/bin/"; \
-	  echo "  (or grab it from the Harvester UI: Support > Download virtctl), then rerun 'make logs'."; \
+	  echo "  (or grab it from the Harvester UI: Support > Download virtctl), then rerun your command."; \
 	  exit 1; \
 	}
-	@echo "Opening the $(BUILD_VM) console. Log in as builder/builder, then run:"
-	@echo "    tail -f ~builder/coriolis-worker-build/coriolis-build.log"
-	@echo "Leave the console with Ctrl-] . Falling back to VNC: virtctl vnc -n $(NS) $(BUILD_VM)"
-	virtctl console -n $(NS) $(BUILD_VM)
 
 .PHONY: destroy
 destroy: ## Delete the Harvester build-host VM, its root PVC and cloud-init secret
