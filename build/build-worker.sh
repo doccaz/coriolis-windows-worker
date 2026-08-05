@@ -149,25 +149,28 @@ cat > "$DOMAIN_XML" <<XML
          `rm -f` each run, so dynamic ownership on them is harmless.) -->
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
-      <source file='${WIN_ISO}'/>
+      <source file='${WIN_ISO}'>
+        <seclabel model='dac' relabel='no'/>
+      </source>
       <target dev='sdb' bus='sata'/>
       <boot order='1'/>
       <readonly/>
-      <seclabel model='dac' relabel='no'/>
     </disk>
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
-      <source file='${CONFIG_ISO}'/>
+      <source file='${CONFIG_ISO}'>
+        <seclabel model='dac' relabel='no'/>
+      </source>
       <target dev='sdc' bus='sata'/>
       <readonly/>
-      <seclabel model='dac' relabel='no'/>
     </disk>
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
-      <source file='${VMDP_ISO}'/>
+      <source file='${VMDP_ISO}'>
+        <seclabel model='dac' relabel='no'/>
+      </source>
       <target dev='sdd' bus='sata'/>
       <readonly/>
-      <seclabel model='dac' relabel='no'/>
     </disk>
     <!-- Scratch disks: make virtio-blk + virtio-scsi devices present so the
          VMDP driver binds and its real service name can be pinned. Not booted
