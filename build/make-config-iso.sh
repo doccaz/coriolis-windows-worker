@@ -78,6 +78,10 @@ trap 'chmod -R u+w "$STAGE" 2>/dev/null; rm -rf "$STAGE"' EXIT
 echo ">> Bundled $inf_found virtio .inf driver folder(s)."
 
 echo ">> Building $CONFIG_ISO"
+# Remove any stale ISO first: a previous local build may have left it owned by
+# qemu (libvirt DAC), in which case the mkiso open(O_TRUNC) would fail with
+# EACCES. Unlinking works regardless of file owner since ASSETS_DIR is ours.
+rm -f "$CONFIG_ISO"
 # -J Joliet, -r Rock Ridge, -V volume label. genisoimage or its xorriso alias.
 if command -v genisoimage >/dev/null; then MKISO=genisoimage; else MKISO="xorrisofs"; fi
 "$MKISO" -J -r -V CORIOLIS -o "$CONFIG_ISO" "$STAGE"

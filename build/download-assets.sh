@@ -12,8 +12,24 @@ WIN_ISO="$ASSETS_DIR/windows-server-eval.iso"
 VMDP_ISO="$ASSETS_DIR/vmdp.iso"
 CB_MSI="$ASSETS_DIR/CloudbaseInitSetup_x64.msi"
 
-fetch() {  # url dest
-    local url="$1" dest="$2"
+fetch() {  # url dest [expected-sha256]
+    local url="$1" dest="$2" want="${3,,}"
+    # If the file is already there and matches its checksum, don't touch it —
+    # this also avoids the case below where a qemu-owned leftover can't be
+    # opened for the resume write.
+    if [[ -f "$dest" && -n "$want" ]] && \
+       echo "$want  $dest" | sha256sum -c --status - 2>/dev/null; then
+        echo ">> $(basename "$dest") already present and verified — skipping download"
+        return 0
+    fi
+    # A previous local build may have left this owned by qemu (libvirt DAC
+    # dynamic ownership), so we — as a different, non-owning user — can't open it
+    # for the `-C -` resume write (EACCES). We *can* still unlink it because
+    # ASSETS_DIR is ours; drop the non-writable leftover so curl recreates it.
+    if [[ -e "$dest" && ! -w "$dest" ]]; then
+        echo ">> $(basename "$dest") exists but isn't writable (owner $(stat -c%U "$dest")); removing to re-fetch"
+        rm -f "$dest"
+    fi
     echo ">> Downloading $(basename "$dest")"
     # -q ignores ~/.curlrc (must be first) so a stray user/root config can't
     # break the build; -C - resumes; --retry rides out flaky mirrors;
@@ -40,11 +56,11 @@ verify() {  # dest expected-sha256
     echo "   OK ($got)"
 }
 
-fetch  "$WIN_ISO_URL"        "$WIN_ISO"
+fetch  "$WIN_ISO_URL"        "$WIN_ISO"   "${WIN_ISO_SHA256:-}"
 verify "$WIN_ISO"            "${WIN_ISO_SHA256:-}"
-fetch  "$VIRTIO_VMDP_URL"    "$VMDP_ISO"
+fetch  "$VIRTIO_VMDP_URL"    "$VMDP_ISO"  "${VIRTIO_VMDP_SHA256:-}"
 verify "$VMDP_ISO"           "${VIRTIO_VMDP_SHA256:-}"
-fetch  "$CLOUDBASE_INIT_URL" "$CB_MSI"
+fetch  "$CLOUDBASE_INIT_URL" "$CB_MSI"    "${CLOUDBASE_INIT_SHA256:-}"
 verify "$CB_MSI"             "${CLOUDBASE_INIT_SHA256:-}"
 
 echo

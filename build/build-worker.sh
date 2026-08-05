@@ -138,24 +138,36 @@ cat > "$DOMAIN_XML" <<XML
       <target dev='sda' bus='sata'/>
       <boot order='2'/>
     </disk>
+    <!-- relabel='no' on the read-only CDROMs: by default libvirt's DAC security
+         driver chowns every disk source to qemu:qemu on start and restores it on
+         a managed stop. But this domain self-destroys via on_poweroff=destroy
+         (sysprep /shutdown), which skips libvirt's restore — so the ISOs would be
+         left owned by qemu and a later unprivileged run couldn't overwrite them
+         (config.iso regen, asset re-download). These ISOs are 0644 and the path
+         has o+x (grant_traverse above), so qemu reads them in place; tell libvirt
+         to leave their ownership alone. (The writable disks are recreated with
+         `rm -f` each run, so dynamic ownership on them is harmless.) -->
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
       <source file='${WIN_ISO}'/>
       <target dev='sdb' bus='sata'/>
       <boot order='1'/>
       <readonly/>
+      <seclabel model='dac' relabel='no'/>
     </disk>
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
       <source file='${CONFIG_ISO}'/>
       <target dev='sdc' bus='sata'/>
       <readonly/>
+      <seclabel model='dac' relabel='no'/>
     </disk>
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
       <source file='${VMDP_ISO}'/>
       <target dev='sdd' bus='sata'/>
       <readonly/>
+      <seclabel model='dac' relabel='no'/>
     </disk>
     <!-- Scratch disks: make virtio-blk + virtio-scsi devices present so the
          VMDP driver binds and its real service name can be pinned. Not booted
